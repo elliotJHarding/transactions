@@ -17,7 +17,7 @@ class Endpoint:
 
 
 @dataclass
-class Institution:
+class InstitutionData:
     id: str
     name: str
     bic: str
@@ -53,7 +53,7 @@ class InstitutionList(list):
     @staticmethod
     def create_institution(obj):
         if type(obj) is dict:
-            institution = Institution(
+            institution = InstitutionData(
             obj["id"],
             obj["name"],
             obj["bic"],
@@ -61,7 +61,7 @@ class InstitutionList(list):
             obj["countries"],
             obj["logo"]
             )
-        elif type(obj) is Institution:
+        elif type(obj) is InstitutionData:
             institution = obj
 
         return institution
@@ -127,7 +127,7 @@ def get_institutions(code: str):
     return InstitutionList(response_data)
 
 
-def get_end_user_agreement(institution: Institution):
+def get_end_user_agreement(institution: InstitutionData):
     headers = {
         "accept": "application/json",
         "Authorization": f"Bearer {Auth.get_access_token()}"
@@ -156,7 +156,7 @@ def get_end_user_agreement(institution: Institution):
     return end_user_agreement
 
 
-def get_requisition(agreement: EndUserAgreement, reference: int, institution: Institution, redirect: str):
+def get_requisition(agreement: EndUserAgreement, reference: int, institution: InstitutionData, redirect: str):
     headers = {
         "accept": "application/json",
         "Authorization": f"Bearer {Auth.get_access_token()}"
