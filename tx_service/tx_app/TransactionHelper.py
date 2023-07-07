@@ -30,7 +30,7 @@ def find_link(accounts, transaction_a):
             transactions = filter(lambda account_transaction: abs(transaction_a.amount) == abs(account_transaction.amount), transactions)
             transactions = list(filter(lambda to_transaction: has_possible_link(to_transaction, transaction_a.account), transactions))
 
-            if len(transactions) > 1:
+            if len(transactions) != 1:
                 return NO_LINK_CREATED
 
             transaction_b = transactions[0]
@@ -55,16 +55,13 @@ def find_link(accounts, transaction_a):
     return False, None
 
 
-
-
-
 def has_possible_link(transaction, from_account=None):
 
     if transaction.debtorAccount is not None or transaction.creditorAccount is not None:
         return True
     elif from_account is not None:
         user_fullname = from_account.account_name.lower()
-        user_shortname = user_fullname.split(' ')[-1][0] + ' ' + user_fullname.split(' ')[-1]
+        user_shortname = user_fullname.split(' ')[-1]
         reference = transaction.reference.lower()
 
         if user_fullname in reference or user_shortname in reference:

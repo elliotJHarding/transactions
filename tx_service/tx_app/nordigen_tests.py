@@ -33,7 +33,7 @@ class NordigenTestCase(TestCase):
         monzo = institutions.get_by_name('monzo')
         user_agreement = nordigen.get_end_user_agreement(monzo)
 
-        link = nordigen.get_requisition(user_agreement, 123, monzo, "http://localhost:8000/redirect")
+        link = nordigen.create_requisition(user_agreement, 123, monzo, "http://localhost:8000/redirect")
 
         self.assertIsNotNone(link)
 

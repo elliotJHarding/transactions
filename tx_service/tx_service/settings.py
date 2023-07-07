@@ -13,6 +13,7 @@ https://docs.djangoproject.com/en/2.2/ref/settings/
 import os
 from dotenv import dotenv_values, find_dotenv
 
+
 secrets = dotenv_values(find_dotenv())
 
 # Build paths inside the project like this: os.path.join(BASE_DIR, ...)
@@ -55,23 +56,30 @@ REST_FRAMEWORK = {
        'rest_framework.authentication.TokenAuthentication',
     ]
 }
-
 MIDDLEWARE = [
+    'corsheaders.middleware.CorsMiddleware',
     'django.middleware.security.SecurityMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
     'django.middleware.common.CommonMiddleware',
     'django.middleware.csrf.CsrfViewMiddleware',
     'django.contrib.auth.middleware.AuthenticationMiddleware',
     'django.contrib.messages.middleware.MessageMiddleware',
-    'django.middleware.clickjacking.XFrameOptionsMiddleware',
-    'corsheaders.middleware.CorsMiddleware'
+    'django.middleware.clickjacking.XFrameOptionsMiddleware'
 ]
+
 
 CORS_ORIGIN_ALLOW_ALL = False
 CORS_ALLOW_CREDENTIALS = True
 CORS_ORIGIN_WHITELIST = (
     'http://localhost:3000',
 )
+CORS_ALLOW_METHODS = [
+    "GET",
+    "PATCH",
+    "POST",
+    "DELETE",
+    "OPTIONS",
+]
 
 ROOT_URLCONF = 'tx_service.urls'
 

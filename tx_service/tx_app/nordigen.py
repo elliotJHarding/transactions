@@ -1,4 +1,6 @@
-from requests import get, post
+import logging
+
+from requests import get, post, delete
 from dotenv import dotenv_values, find_dotenv
 import json
 from dataclasses import dataclass
@@ -12,6 +14,9 @@ class Endpoint:
     INSTITUTIONS = "https://ob.nordigen.com/api/v2/institutions/"
     END_USER_AGREEMENT = "https://ob.nordigen.com/api/v2/agreements/enduser/"
     REQUISITIONS = "https://ob.nordigen.com/api/v2/requisitions/"
+    ACCOUNTS = "https://ob.nordigen.com/api/v2/accounts/"
+    @classmethod
+    def ACCOUNT_DETAILS(cls, account_id): return f"{cls.ACCOUNTS}{account_id}/details"
     @staticmethod
     def TRANSACTIONS(account_id): return f"https://ob.nordigen.com/api/v2/accounts/{account_id}/transactions/"
 
@@ -44,6 +49,17 @@ class Requisition:
     accounts: list
     reference: int
     link: str
+
+@dataclass
+class Account:
+    resource_id: str
+    iban: str
+    bban: str
+    currency: str
+    owner_name: str
+    name: str
+    cash_account_type: str
+
 
 
 class InstitutionList(list):
@@ -107,12 +123,17 @@ class Auth:
 
         return response_data['access']
 
+    @classmethod
+    def get_headers(cls):
+        headers = {
+            "accept": "application/json",
+            "Authorization": f"Bearer {cls.get_access_token()}"
+        }
+        return headers
+
 
 def get_institutions(code: str):
-    headers = {
-        "accept": "application/json",
-        "Authorization": f"Bearer {Auth.get_access_token()}"
-    }
+    headers = Auth.get_headers()
     params = {
         "country": code
     }
@@ -128,10 +149,7 @@ def get_institutions(code: str):
 
 
 def get_end_user_agreement(institution: InstitutionData):
-    headers = {
-        "accept": "application/json",
-        "Authorization": f"Bearer {Auth.get_access_token()}"
-    }
+    headers = Auth.get_headers()
     data = {
         "institution_id": institution.id
     }
@@ -156,21 +174,21 @@ def get_end_user_agreement(institution: InstitutionData):
     return end_user_agreement
 
 
-def get_requisition(agreement: EndUserAgreement, reference: int, institution: InstitutionData, redirect: str):
-    headers = {
-        "accept": "application/json",
-        "Authorization": f"Bearer {Auth.get_access_token()}"
-    }
+def create_requisition(reference: int, institution_id: str, redirect: str, agreement: EndUserAgreement = None):
+    headers = Auth.get_headers()
     data = {
-        "agreement": agreement.id,
         "redirect": redirect,
-        "institution_id": institution.id,
+        "institution_id": institution_id,
         "reference": reference,
     }
+
+    if agreement is not None:
+        data["agreement"] = agreement.id
 
     response = post(Endpoint.REQUISITIONS, data=data, headers=headers)
 
     if response.status_code != 201:
+        logging.log(logging.ERROR, response.text)
         raise ConnectionError
 
     response_data = json.loads(response.text)
@@ -179,23 +197,82 @@ def get_requisition(agreement: EndUserAgreement, reference: int, institution: In
         response_data["id"],
         response_data["redirect"],
         response_data["status"],
-        response_data["agreements"],
+        None,
         response_data["accounts"],
         response_data["reference"],
         response_data["link"]
     )
 
+    if 'agreements' in response_data:
+        link.agreements = response_data['agreements']
+
     return link
 
 
+def get_requisition(id: str):
+    headers = Auth.get_headers()
+
+    response = get(Endpoint.REQUISITIONS + id, headers=headers)
+    response_data = json.loads(response.text)
+
+    requisition = Requisition(
+        response_data["id"],
+        response_data["redirect"],
+        response_data["status"],
+        None,
+        response_data["accounts"],
+        response_data["reference"],
+        response_data["link"]
+    )
+
+    if 'agreements' in response_data:
+        requisition.agreements = response_data['agreements']
+
+    return requisition
+
+
+def get_account(account_id: str):
+    headers = Auth.get_headers()
+
+    response = get(Endpoint.ACCOUNT_DETAILS(account_id), headers=headers)
+    response_data = json.loads(response.text)
+    response_data = response_data['account']
+
+    account = Account(
+        response_data["resourceId"],
+        None,
+        response_data["bban"],
+        response_data["currency"],
+        response_data["ownerName"],
+        None,
+        response_data["cashAccountType"]
+    )
+    if 'iban' in response_data:
+        account.iban = response_data['iban']
+
+    if 'name' in response_data:
+        account.name = response_data['name']
+
+    return account
+
+
 def get_transactions(account_id: str):
-    headers = {
-        "accept": "application/json",
-        "Authorization": f"Bearer {Auth.get_access_token()}"
-    }
+    headers = Auth.get_headers()
 
     response = get(Endpoint.TRANSACTIONS(account_id), headers=headers)
 
     response_data = json.loads(response.text)
 
     return response_data
+
+
+def delete_requisition(requisition_id):
+    headers = Auth.get_headers()
+
+    response = delete(Endpoint.REQUISITIONS + requisition_id, headers=headers)
+
+    if str(response.status_code)[0] != '2':
+        logging.log(logging.ERROR, response.text)
+        return False
+    else:
+        return True
