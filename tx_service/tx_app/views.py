@@ -2,6 +2,7 @@ import datetime
 
 from django.contrib.auth.models import User
 from django.http import JsonResponse
+from django.views.decorators.csrf import csrf_exempt
 from rest_framework.views import APIView
 from rest_framework.views import Response
 from rest_framework.exceptions import bad_request, ValidationError
@@ -14,7 +15,6 @@ from datetime import timedelta
 
 import tx_app.Serialize as serialize
 import tx_app.models as models
-# import tx_service.tx_app.models as models
 
 MIN_USERNAME_LENGTH = 5
 MIN_PASSWORD_LENGTH = 5
@@ -140,15 +140,22 @@ class SetTransactionTag(APIView):
 
         try:
             transactionId = request.data['transactionId']
-            tagId = request.data['tagId']
         except KeyError as e:
             return Response(status=400, data={"error": str(e)})
 
-        transaction = models.Transaction.objects.get(id=transactionId)
-        tag = models.Tag.objects.get(id=tagId)
+        try:
+            tagId = request.data['tagId']
+        except KeyError:
+            tagId = None;
 
-        if transaction.account.user != user or tag.user != user:
-            return Response(status=403)
+        transaction = models.Transaction.objects.get(id=transactionId)
+        if tagId is not None:
+            tag = models.Tag.objects.get(id=tagId)
+        else:
+            tag = None
+
+        if transaction.account.user != user or (tag is not None and tag.user != user and tag.user is not None):
+            return Response(status=403, data={'error': 'Transaction or Tag does not belong to user'})
 
         transaction.tag = tag
         models.Transaction.save(transaction)

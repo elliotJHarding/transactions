@@ -1,3 +1,4 @@
+import datetime
 import logging
 
 from requests import get, post, delete
@@ -6,19 +7,39 @@ import json
 from dataclasses import dataclass
 
 secrets = dotenv_values(find_dotenv())
-access_token = None
+
+
+class Token:
+    def __init__(self, token: str, expires_in_seconds: int):
+        self.token = token
+        self.expires = datetime.datetime.utcnow() + datetime.timedelta(seconds=expires_in_seconds)
+
+    def is_valid(self):
+        if datetime.datetime.now() > self.expires:
+            return False
+        else:
+            return True
+
+    def __repr__(self):
+        return self.token
+
+    def __str__(self):
+        return self.token
 
 
 class Endpoint:
-    ACCESS_TOKEN = "https://ob.nordigen.com/api/v2/token/new/"
-    INSTITUTIONS = "https://ob.nordigen.com/api/v2/institutions/"
-    END_USER_AGREEMENT = "https://ob.nordigen.com/api/v2/agreements/enduser/"
-    REQUISITIONS = "https://ob.nordigen.com/api/v2/requisitions/"
-    ACCOUNTS = "https://ob.nordigen.com/api/v2/accounts/"
+    protocol, domain, api = "https", "ob.nordigen.com", "api/v2"
+    url = f"{protocol}://{domain}/{api}"
+    ACCESS_TOKEN =          f"{url}/token/new/"
+    REFRESH_TOKEN =         f"{url}/token/refresh/"
+    INSTITUTIONS =          f"{url}/institutions/"
+    END_USER_AGREEMENT =    f"{url}/agreements/enduser/"
+    REQUISITIONS =          f"{url}/requisitions/"
+    ACCOUNTS =              f"{url}/accounts/"
     @classmethod
     def ACCOUNT_DETAILS(cls, account_id): return f"{cls.ACCOUNTS}{account_id}/details"
-    @staticmethod
-    def TRANSACTIONS(account_id): return f"https://ob.nordigen.com/api/v2/accounts/{account_id}/transactions/"
+    @classmethod
+    def TRANSACTIONS(cls, account_id): return f"{cls.ACCOUNTS}{account_id}/transactions/"
 
 
 @dataclass
@@ -61,7 +82,6 @@ class Account:
     cash_account_type: str
 
 
-
 class InstitutionList(list):
     def __init__(self, institutions: list):
         super(InstitutionList, self).__init__(self.create_institution(obj) for obj in institutions)
@@ -93,16 +113,38 @@ class InstitutionList(list):
 
 
 class Auth:
-    _access_token: str = None
+    _access_token: Token = None
+    _refresh_token: Token = None
 
     @classmethod
     def get_access_token(cls):
         if cls._access_token is None:
-            cls._access_token = cls.request_access_token()
+            cls._access_token, cls._refresh_token = cls.request_tokens()
+        elif not cls._access_token.is_valid():
+            if cls._refresh_token.is_valid():
+                cls._access_token = cls.refresh_access_token()
+            else:
+                cls._access_token, cls._refresh_token = cls.request_tokens()
+
         return cls._access_token
 
     @classmethod
-    def request_access_token(cls):
+    def refresh_access_token(cls):
+        headers = {
+            "accept": "application/json",
+            "Content-Type": "application/json",
+        }
+        data = {
+            "refresh": cls._refresh_token
+        }
+
+        response = post(Endpoint.REFRESH_TOKEN, json=data, headers=headers)
+        response_data = json.loads(response.text)
+
+        return Token(response_data['access'], response_data['access_expires'])
+
+    @classmethod
+    def request_tokens(cls):
         headers = {
             "accept": "application/json",
             "Content-Type": "application/json",
@@ -118,10 +160,10 @@ class Auth:
 
         response_data = json.loads(response.text)
 
-        if "access" not in response_data:
-            raise LookupError
+        access_token = Token(response_data['access'], response_data['access_expires'])
+        refresh_token = Token(response_data['refresh'], response_data['refresh_expires'])
 
-        return response_data['access']
+        return access_token, refresh_token
 
     @classmethod
     def get_headers(cls):
