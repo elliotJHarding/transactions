@@ -37,9 +37,11 @@ class Endpoint:
     REQUISITIONS =          f"{url}/requisitions/"
     ACCOUNTS =              f"{url}/accounts/"
     @classmethod
-    def ACCOUNT_DETAILS(cls, account_id): return f"{cls.ACCOUNTS}{account_id}/details"
+    def ACCOUNT_DETAILS(cls, account_id): return f"{cls.ACCOUNTS}{account_id}/details/"
     @classmethod
     def TRANSACTIONS(cls, account_id): return f"{cls.ACCOUNTS}{account_id}/transactions/"
+    @classmethod
+    def ACCOUNT_BALANCE(cls, account_id): return f"{cls.ACCOUNTS}{account_id}/balances/"
 
 
 @dataclass
@@ -135,7 +137,7 @@ class Auth:
             "Content-Type": "application/json",
         }
         data = {
-            "refresh": cls._refresh_token
+            "refresh": cls._refresh_token.token
         }
 
         response = post(Endpoint.REFRESH_TOKEN, json=data, headers=headers)
@@ -283,19 +285,39 @@ def get_account(account_id: str):
     account = Account(
         response_data["resourceId"],
         None,
-        response_data["bban"],
+        None,
         response_data["currency"],
-        response_data["ownerName"],
+        None,
         None,
         response_data["cashAccountType"]
     )
     if 'iban' in response_data:
         account.iban = response_data['iban']
 
+    if 'bban' in response_data:
+        account.bban = response_data['bban']
+
     if 'name' in response_data:
         account.name = response_data['name']
+    elif 'details' in response_data:
+        account.name = response_data['details']
+
+    if 'ownerName' in response_data:
+        account.owner_name = response_data['ownerName']
 
     return account
+
+
+def get_account_balance(account_id):
+    headers = Auth.get_headers()
+
+    response = get(Endpoint.ACCOUNT_BALANCE(account_id), headers=headers)
+    response_data = json.loads(response.text)
+    balances = response_data['balances']
+    balance_amount = balances['balanceAmount']
+    amount = balance_amount['amount']
+
+    return amount
 
 
 def get_transactions(account_id: str):

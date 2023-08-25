@@ -12,6 +12,8 @@ urlpatterns = [
    path('accounts/update', UpdateAccounts.as_view()),
    path('institutions', GetInstitutions.as_view()),
    path('requisition', Requisition.as_view()),
+   path('tags', Tags.as_view()),
+   path('rules', TagRules.as_view()),
 
    path('private/upload/transactions', UploadTransactions.as_view()),
    path('private/update/institutions', UpdateInstitutions.as_view()),

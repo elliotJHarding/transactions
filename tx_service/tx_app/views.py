@@ -19,11 +19,6 @@ import tx_app.models as models
 MIN_USERNAME_LENGTH = 5
 MIN_PASSWORD_LENGTH = 5
 
-def get_user_from_token(token):
-    user_id = Token.objects.get(key__exact=token).user_id
-    return User.objects.get(id=user_id)
-
-
 # Create your views here.
 
 class CreateUser(APIView):
@@ -72,8 +67,8 @@ class UpdateAccounts(APIView):
     permission_classes = (IsAuthenticated,)
 
     def get(self, request):
-        token = request.auth.key
-        user=get_user_from_token(token)
+
+        user = request.user
 
         requisitions = models.Requisition.objects.filter(user=user, status__exact='ACTIVE')
 
@@ -110,6 +105,7 @@ class GetTransactions(APIView):
                 transactions_collected = True
                 transactions = nordigen.get_transactions(account.resource_id)
                 account.save_transactions(transactions['transactions']['booked'])
+                account.update_balance(nordigen.get_account_balance(account.resource_id))
 
         if transactions_collected:
             TransactionHelper.find_links(user)
@@ -127,16 +123,90 @@ class GetTransactions(APIView):
         for tag in tags:
             sub_tags += list(models.Tag.objects.filter(parent=tag))
 
+        rules = models.TagRule.objects.filter(user=user)
+        for rule in rules:
+            for account in transactions:
+                for transaction in transactions[account]:
+                    if rule.expression.lower() in transaction.reference.lower():
+                        if transaction.tag is None:
+                            transaction.tag = rule.tag
+
         return JsonResponse(data=serialize.transactions(accounts, transactions, institutions, links, tags, sub_tags))
+
+
+class Tags(APIView):
+    permission_classes = (IsAuthenticated,)
+
+    def get(self, request):
+
+        user = request.user
+
+        tags = list(models.Tag.objects.filter(user=None, parent=None)) + list(models.Tag.objects.filter(user=user, parent=None))
+        sub_tags = []
+
+        for tag in tags:
+            sub_tags += list(models.Tag.objects.filter(parent=tag))
+
+        rules = models.TagRule.objects.filter(user=user)
+
+        return JsonResponse(data=serialize.tags(tags, sub_tags, rules))
+
+
+    def put(self, request):
+        user = request.user
+
+        data = request.data
+
+        try:
+            parent_tag_id = data['parentTag'] if 'parentTag' in data else None
+            name = data['name']
+            icon = data['icon']
+        except KeyError as error:
+            return JsonResponse(status=500, data={'error': str(error)})
+
+        tag = models.Tag()
+        tag.user = user
+        tag.name = name
+        tag.icon = icon
+        if parent_tag_id != None:
+            parentTag = models.Tag.objects.get(id=parent_tag_id)
+            tag.parent = parentTag
+
+        tag.save()
+
+        return Response(status=201)
+
+
+
+    def patch(self, request):
+        user = request.user
+
+        try:
+            tag_id = request.data['tagId']
+            name = request.data['name']
+            icon = request.data['icon']
+        except KeyError as error:
+            return JsonResponse(status=500, data={'error': str(error)})
+
+        tag = models.Tag.objects.get(id=tag_id)
+
+        if tag.user != user:
+            return JsonResponse(status=403, data={'error': 'You are not authorized to edit this tag'})
+
+        tag.name = name
+        tag.icon = icon
+        tag.save()
+
+        return Response(status=201)
+
 
 
 class SetTransactionTag(APIView):
     permission_classes = (IsAuthenticated,)
 
     def post(self, request):
-        token = request.auth.key
-        user_id = Token.objects.get(key__exact=token).user_id
-        user = models.User.objects.get(id=user_id)
+
+        user = request.user
 
         try:
             transactionId = request.data['transactionId']
@@ -180,7 +250,7 @@ class Requisition(APIView):
     permission_classes = (IsAuthenticated,)
 
     def post(self, request):
-        user = get_user_from_token(request.auth.key)
+        user = request.user
 
         try:
             institution_id = request.data['bankCode']
@@ -293,3 +363,59 @@ class FindLinks(APIView):
         TransactionHelper.find_links(User.objects.get(id=9))
 
         return Response(status=200)
+
+
+class TagRules(APIView):
+    permission_classes = (IsAuthenticated,)
+
+    def get(self, request):
+        user = request.user
+
+        rules = models.TagRule.filter(user=user)
+
+        return JsonResponse(status=200, data=serialize.rules(rules))
+
+    def put(self, request):
+        user = request.user
+
+        data = request.data
+
+        try:
+            tag_id = data['tagId']
+            expression = data['expression']
+        except KeyError as e:
+            return JsonResponse(status=400, data={"error": str(e)})
+
+        rule = models.TagRule()
+        rule.user = user
+        rule.tag = models.Tag.objects.get(id=tag_id)
+        rule.expression = expression
+
+        rule.save()
+
+        return Response(status=201)
+
+    def patch(self, request):
+        user = request.user
+
+        data = request.data
+
+        try:
+            ruleId = data['ruleId']
+            expression = data['expression']
+        except KeyError as e:
+            return JsonResponse(status=400, data={"error": e})
+
+        rule = models.TagRule.get(id=ruleId)
+
+        if rule.user.id != user.id:
+            return JsonResponse(status=403, data={"error": "Unauthorised to edit this rule"})
+
+
+
+
+
+
+
+
+

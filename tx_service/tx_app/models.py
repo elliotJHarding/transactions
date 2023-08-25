@@ -20,7 +20,7 @@ class Institution(models.Model):
 # Create your models here.
 class Account(models.Model):
     resource_id = models.CharField(max_length=200)
-    name = models.CharField(max_length=200)
+    name = models.CharField(max_length=200, null=True)
     user = models.ForeignKey(User, on_delete=models.CASCADE)
     bban = models.BigIntegerField(null=True)
     iban = models.CharField(max_length=200, null=True)
@@ -46,13 +46,16 @@ class Account(models.Model):
         }
         return account_data
 
+    def update_balance(self, amount):
+        self.balance = amount
+        self.save()
+
     def save_transactions(self, booked_transactions):
         transactions_to_commit = []
         for transaction in booked_transactions:
             keys = transaction.keys()
             transactionObject = Transaction()
             transactionObject.account = Account.objects.get(id__exact=self.id)
-            transactionObject.transaction_id = transaction['transactionId']
             transactionObject.internal_transaction_id = transaction['internalTransactionId']
             transactionObject.booking_date = transaction['bookingDate']
             transactionObject.value_date = transaction['valueDate'] if 'valueDate' in keys else None
@@ -63,6 +66,9 @@ class Account(models.Model):
             transactionObject.currency = transaction['transactionAmount']['currency']
             transactionObject.reference = transaction['remittanceInformationUnstructured']
 
+            if "transactionId" in transaction.keys():
+                transactionObject.transaction_id = transaction['transactionId']
+
             if "creditorName" in transaction.keys():
                 transactionObject.creditorName = transaction["creditorName"]
             if "creditorAccount" in transaction.keys():
@@ -72,7 +78,7 @@ class Account(models.Model):
                 transactionObject.debtorName = transaction["debtorName"]
                 transactionObject.debtorAccount = transaction["debtorAccount"]["bban"]
 
-            if float(transactionObject.amount) < 0:
+            if float(transactionObject.amount) < 0 and 'proprietaryBankTransactionCode' in transaction.keys():
                 transactionObject.transactions_code = transaction['proprietaryBankTransactionCode']
 
             transactions_to_commit.append(transactionObject)
@@ -164,3 +170,14 @@ class Requisition(models.Model):
     external_id = models.CharField(max_length=200)
     status = models.CharField(max_length=50)
 
+
+class TagRule(models.Model):
+    user = models.ForeignKey(User, models.CASCADE)
+    tag = models.ForeignKey(Tag, models.CASCADE)
+    expression = models.CharField(max_length=200)
+
+    def serialize(self):
+        return {
+            "id": self.id,
+            "expression": self.expression
+        }

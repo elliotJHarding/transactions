@@ -18,6 +18,24 @@ def accounts(accounts):
     return account_data
 
 
+def tags(tags, sub_tags, rules):
+    data = {
+        'tags': []
+    }
+
+    for tag in tags:
+        tag_data = tag.serialize()
+
+        tag_data['childTags'] = [sub_tag.serialize() for sub_tag in sub_tags if sub_tag.parent.id == tag.id]
+        for childTag in tag_data['childTags']:
+            childTag['rules'] = [rule.serialize() for rule in rules if rule.tag.id == childTag['id']]
+
+        data['tags'].append(tag_data)
+        tag_data['rules'] = [rule.serialize() for rule in rules if rule.tag.id == tag.id]
+
+    return data
+
+
 def transactions(accounts, transactions, institutions, links, tags, sub_tags):
     data = {
         'accounts': [],
@@ -48,3 +66,8 @@ def transactions(accounts, transactions, institutions, links, tags, sub_tags):
         data['tags'].append(tag_data)
 
     return data
+
+
+def rules(rules):
+    return {"rules": [rule.serialize() for rule in rules]}
+
