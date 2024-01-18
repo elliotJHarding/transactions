@@ -27,7 +27,7 @@ jobs:
         pip install -r requirements.txt
     - name: 'Create env file'
       run: |
-        echo "${{ secrets.ENV }}" > .env
+        echo "${{ secrets.ENV_FILE }}" > .env
     - name: Run Tests
       run: |
         python tx_service/manage.py test
