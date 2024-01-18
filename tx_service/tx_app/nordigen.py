@@ -233,6 +233,7 @@ def create_requisition(reference: int, institution_id: str, redirect: str, agree
 
     if response.status_code != 201:
         logging.log(logging.ERROR, response.text)
+        print(response.text)
         raise ConnectionError
 
     response_data = json.loads(response.text)
@@ -314,7 +315,7 @@ def get_account_balance(account_id):
     response = get(Endpoint.ACCOUNT_BALANCE(account_id), headers=headers)
     response_data = json.loads(response.text)
     balances = response_data['balances']
-    balance_amount = balances['balanceAmount']
+    balance_amount = balances[0]['balanceAmount']
     amount = balance_amount['amount']
 
     return amount
@@ -326,6 +327,9 @@ def get_transactions(account_id: str):
     response = get(Endpoint.TRANSACTIONS(account_id), headers=headers)
 
     response_data = json.loads(response.text)
+
+    if response.status_code == 400 and 'expired' in response_data['summary']:
+        raise ValueError(f"EUA has expired for account with id: {account_id}")
 
     return response_data
 

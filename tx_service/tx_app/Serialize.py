@@ -18,9 +18,22 @@ def accounts(accounts):
     return account_data
 
 
-def tags(tags, sub_tags, rules):
+def holidays(holidays):
+    holiday_data = []
+    for holiday in holidays:
+        year = holiday.start_date.year
+        if year not in [hol['year'] for hol in holiday_data]:
+            holiday_data.append({'year': year, 'holidays': []})
+
+        holiday_data[[hol['year'] for hol in holiday_data].index(year)]['holidays'].append(holiday.serialize_with_financial_summary())
+
+
+    return holiday_data
+
+def tags(tags, sub_tags, rules, categories):
     data = {
-        'tags': []
+        'tags': [],
+        'categories': [category.serialize() for category in categories]
     }
 
     for tag in tags:
@@ -70,4 +83,3 @@ def transactions(accounts, transactions, institutions, links, tags, sub_tags):
 
 def rules(rules):
     return {"rules": [rule.serialize() for rule in rules]}
-
