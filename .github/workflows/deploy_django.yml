@@ -31,4 +31,4 @@ jobs:
     - name: Launch server
       run: |
         cd tx_service
-        gunicorn --bind=192.168.1.207 tx_service.wsgi
+        gunicorn --bind=192.168.1.207 tx_service.wsgi &
