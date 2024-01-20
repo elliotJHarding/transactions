@@ -30,6 +30,7 @@ jobs:
       run: |
         echo '${{ secrets.ENV_FILE }}' > .env
     - name: Kill running servers
+      continue-on-error: true
       run: |
         pkill gunicorn
     - name: Launch server
