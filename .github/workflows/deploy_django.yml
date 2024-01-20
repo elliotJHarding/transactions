@@ -1,4 +1,4 @@
-name: Django CI
+name: Deploy Django
 
 on:
   push:
@@ -29,6 +29,9 @@ jobs:
     - name: Create env file
       run: |
         echo '${{ secrets.ENV_FILE }}' > .env
+    - name: Kill running servers
+      run: |
+        pkill gunicorn
     - name: Launch server
       run: |
         cd tx_service
