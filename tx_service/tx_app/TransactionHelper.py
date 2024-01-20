@@ -6,19 +6,21 @@ from tx_app.models import *
 def find_links(user):
     accounts = Account.objects.filter(user=user)
 
+    institutions = [account.institution for account in accounts]
+
     for account in accounts:
         transactions = Transaction.objects.filter(account=account)
         for transaction in transactions:
-            linked, link = find_link(accounts, transaction)
+            linked, link = find_link(accounts, transaction, institutions)
             if linked:
                 print(link)
 
 
-def find_link(accounts, transaction_a):
+def find_link(accounts, transaction_a, institutions):
 
     NO_LINK_CREATED = False, None
 
-    if has_possible_link(transaction_a):
+    if has_possible_link(transaction_a, institutions):
         transaction_ban = transaction_a.debtorAccount if transaction_a.debtorAccount is not None else transaction_a.creditorAccount
 
         if transaction_ban in [account.get_bank_number() for account in accounts]:
@@ -28,7 +30,7 @@ def find_link(accounts, transaction_a):
                 return NO_LINK_CREATED
             transactions = Transaction.objects.filter(account=account, booking_date=transaction_a.booking_date)
             transactions = filter(lambda account_transaction: abs(transaction_a.amount) == abs(account_transaction.amount), transactions)
-            transactions = list(filter(lambda to_transaction: has_possible_link(to_transaction, transaction_a.account), transactions))
+            transactions = list(filter(lambda to_transaction: has_link(to_transaction, transaction_a), transactions))
 
             if len(transactions) != 1:
                 return NO_LINK_CREATED
@@ -55,7 +57,10 @@ def find_link(accounts, transaction_a):
     return False, None
 
 
-def has_possible_link(transaction, from_account=None):
+def has_possible_link(transaction, institutions, from_account=None):
+
+    if transaction.reference.lower() in [institution.name.lower() for institution in institutions]:
+        return True
 
     if transaction.debtorAccount is not None or transaction.creditorAccount is not None:
         return True
@@ -70,3 +75,11 @@ def has_possible_link(transaction, from_account=None):
             return False
     else:
         return False
+
+def has_link(transaction_a, transaction_b):
+    linked = True
+
+    linked = False if transaction_a.booking_date != transaction_b.booking_date else linked
+    linked = False if transaction_a.amount + transaction_b.amount != 0 else linked
+
+    return linked
