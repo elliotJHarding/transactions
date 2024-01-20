@@ -1,3 +1,4 @@
+import datetime
 import logging
 
 from requests import get, post, delete
@@ -6,19 +7,41 @@ import json
 from dataclasses import dataclass
 
 secrets = dotenv_values(find_dotenv())
-access_token = None
+
+
+class Token:
+    def __init__(self, token: str, expires_in_seconds: int):
+        self.token = token
+        self.expires = datetime.datetime.utcnow() + datetime.timedelta(seconds=expires_in_seconds)
+
+    def is_valid(self):
+        if datetime.datetime.now() > self.expires:
+            return False
+        else:
+            return True
+
+    def __repr__(self):
+        return self.token
+
+    def __str__(self):
+        return self.token
 
 
 class Endpoint:
-    ACCESS_TOKEN = "https://ob.nordigen.com/api/v2/token/new/"
-    INSTITUTIONS = "https://ob.nordigen.com/api/v2/institutions/"
-    END_USER_AGREEMENT = "https://ob.nordigen.com/api/v2/agreements/enduser/"
-    REQUISITIONS = "https://ob.nordigen.com/api/v2/requisitions/"
-    ACCOUNTS = "https://ob.nordigen.com/api/v2/accounts/"
+    protocol, domain, api = "https", "ob.nordigen.com", "api/v2"
+    url = f"{protocol}://{domain}/{api}"
+    ACCESS_TOKEN =          f"{url}/token/new/"
+    REFRESH_TOKEN =         f"{url}/token/refresh/"
+    INSTITUTIONS =          f"{url}/institutions/"
+    END_USER_AGREEMENT =    f"{url}/agreements/enduser/"
+    REQUISITIONS =          f"{url}/requisitions/"
+    ACCOUNTS =              f"{url}/accounts/"
     @classmethod
-    def ACCOUNT_DETAILS(cls, account_id): return f"{cls.ACCOUNTS}{account_id}/details"
-    @staticmethod
-    def TRANSACTIONS(account_id): return f"https://ob.nordigen.com/api/v2/accounts/{account_id}/transactions/"
+    def ACCOUNT_DETAILS(cls, account_id): return f"{cls.ACCOUNTS}{account_id}/details/"
+    @classmethod
+    def TRANSACTIONS(cls, account_id): return f"{cls.ACCOUNTS}{account_id}/transactions/"
+    @classmethod
+    def ACCOUNT_BALANCE(cls, account_id): return f"{cls.ACCOUNTS}{account_id}/balances/"
 
 
 @dataclass
@@ -61,7 +84,6 @@ class Account:
     cash_account_type: str
 
 
-
 class InstitutionList(list):
     def __init__(self, institutions: list):
         super(InstitutionList, self).__init__(self.create_institution(obj) for obj in institutions)
@@ -93,16 +115,38 @@ class InstitutionList(list):
 
 
 class Auth:
-    _access_token: str = None
+    _access_token: Token = None
+    _refresh_token: Token = None
 
     @classmethod
     def get_access_token(cls):
         if cls._access_token is None:
-            cls._access_token = cls.request_access_token()
+            cls._access_token, cls._refresh_token = cls.request_tokens()
+        elif not cls._access_token.is_valid():
+            if cls._refresh_token.is_valid():
+                cls._access_token = cls.refresh_access_token()
+            else:
+                cls._access_token, cls._refresh_token = cls.request_tokens()
+
         return cls._access_token
 
     @classmethod
-    def request_access_token(cls):
+    def refresh_access_token(cls):
+        headers = {
+            "accept": "application/json",
+            "Content-Type": "application/json",
+        }
+        data = {
+            "refresh": cls._refresh_token.token
+        }
+
+        response = post(Endpoint.REFRESH_TOKEN, json=data, headers=headers)
+        response_data = json.loads(response.text)
+
+        return Token(response_data['access'], response_data['access_expires'])
+
+    @classmethod
+    def request_tokens(cls):
         headers = {
             "accept": "application/json",
             "Content-Type": "application/json",
@@ -118,10 +162,10 @@ class Auth:
 
         response_data = json.loads(response.text)
 
-        if "access" not in response_data:
-            raise LookupError
+        access_token = Token(response_data['access'], response_data['access_expires'])
+        refresh_token = Token(response_data['refresh'], response_data['refresh_expires'])
 
-        return response_data['access']
+        return access_token, refresh_token
 
     @classmethod
     def get_headers(cls):
@@ -189,6 +233,7 @@ def create_requisition(reference: int, institution_id: str, redirect: str, agree
 
     if response.status_code != 201:
         logging.log(logging.ERROR, response.text)
+        print(response.text)
         raise ConnectionError
 
     response_data = json.loads(response.text)
@@ -241,19 +286,39 @@ def get_account(account_id: str):
     account = Account(
         response_data["resourceId"],
         None,
-        response_data["bban"],
+        None,
         response_data["currency"],
-        response_data["ownerName"],
+        None,
         None,
         response_data["cashAccountType"]
     )
     if 'iban' in response_data:
         account.iban = response_data['iban']
 
+    if 'bban' in response_data:
+        account.bban = response_data['bban']
+
     if 'name' in response_data:
         account.name = response_data['name']
+    elif 'details' in response_data:
+        account.name = response_data['details']
+
+    if 'ownerName' in response_data:
+        account.owner_name = response_data['ownerName']
 
     return account
+
+
+def get_account_balance(account_id):
+    headers = Auth.get_headers()
+
+    response = get(Endpoint.ACCOUNT_BALANCE(account_id), headers=headers)
+    response_data = json.loads(response.text)
+    balances = response_data['balances']
+    balance_amount = balances[0]['balanceAmount']
+    amount = balance_amount['amount']
+
+    return amount
 
 
 def get_transactions(account_id: str):
@@ -262,6 +327,9 @@ def get_transactions(account_id: str):
     response = get(Endpoint.TRANSACTIONS(account_id), headers=headers)
 
     response_data = json.loads(response.text)
+
+    if response.status_code == 400 and 'expired' in response_data['summary']:
+        raise ValueError(f"EUA has expired for account with id: {account_id}")
 
     return response_data
 

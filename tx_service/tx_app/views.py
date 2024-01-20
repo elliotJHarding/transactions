@@ -1,4 +1,5 @@
 import datetime
+import logging
 
 from django.contrib.auth.models import User
 from django.http import JsonResponse
@@ -6,7 +7,6 @@ from rest_framework.views import APIView
 from rest_framework.views import Response
 from rest_framework.exceptions import bad_request, ValidationError
 from rest_framework.permissions import IsAuthenticated
-from rest_framework.authtoken.views import obtain_auth_token
 from rest_framework.authtoken.models import Token
 import tx_app.nordigen as nordigen
 import tx_app.TransactionHelper as TransactionHelper
@@ -14,17 +14,21 @@ from datetime import timedelta
 
 import tx_app.Serialize as serialize
 import tx_app.models as models
-# import tx_service.tx_app.models as models
 
 MIN_USERNAME_LENGTH = 5
 MIN_PASSWORD_LENGTH = 5
 
-def get_user_from_token(token):
-    user_id = Token.objects.get(key__exact=token).user_id
-    return User.objects.get(id=user_id)
-
-
 # Create your views here.
+
+
+def validate_ownership(resource, requesting_user):
+    if resource.user is not None and resource.user != requesting_user:
+        error = f"Resource {resource} does not belong to user"
+        logging.log(logging.ERROR, error)
+        return False, Response(status=403, data={'error': error})
+    else:
+        return True, None
+
 
 class CreateUser(APIView):
     def post(self, request):
@@ -49,7 +53,6 @@ class GetProfile(APIView):
     permission_classes = (IsAuthenticated,)
 
     def get(self, request):
-
         token = request.auth.key
 
         user_id = Token.objects.get(key__exact=token).user_id
@@ -72,44 +75,54 @@ class UpdateAccounts(APIView):
     permission_classes = (IsAuthenticated,)
 
     def get(self, request):
-        token = request.auth.key
-        user=get_user_from_token(token)
+
+        user = request.user
 
         requisitions = models.Requisition.objects.filter(user=user, status__exact='ACTIVE')
 
         for requisition in requisitions:
-            link = nordigen.get_requisition(requisition.external_id)
-            for account_id in link.accounts:
-                account_details = nordigen.get_account(account_id)
-                account, created = models.Account.objects.get_or_create(
-                    resource_id=account_id, user=user, name=account_details.owner_name, institution=requisition.institution)
-                account.account_name = account_details.owner_name
-                account.iban = account_details.iban
-                account.bban = account_details.bban
-                account.save()
+            if requisition.expires > datetime.date.today():
+                link = nordigen.get_requisition(requisition.external_id)
+                for account_id in link.accounts:
+                    account_details = nordigen.get_account(account_id)
+                    account, created = models.Account.objects.get_or_create(
+                        resource_id=account_id, user=user, institution=requisition.institution)
+
+                    if account.name is None:
+                        account.name = requisition.institution.name
+                    account.account_name = account_details.owner_name
+                    account.iban = account_details.iban
+                    account.bban = account_details.bban
+                    account.requisition = requisition
+                    account.save()
+            else:
+                requisition.status = 'EXPIRED'
+                requisition.save()
 
         return Response(status=200)
 
 
-class GetTransactions(APIView):
+class Transactions(APIView):
     permission_classes = (IsAuthenticated,)
 
     def get(self, request):
-        token = request.auth.key
-
-        user_id = Token.objects.get(key__exact=token).user_id
-        user = models.User.objects.get(id=user_id)
+        user = request.user
 
         accounts = models.Account.objects.filter(user=user)
 
         transactions_collected = False
 
         for account in accounts:
-            should_collect_transactions = account.last_collected_transactions is None or account.last_collected_transactions < datetime.datetime.now(tz=datetime.timezone.utc) - timedelta(hours=6)
+            should_collect_transactions = account.last_collected_transactions is None or account.last_collected_transactions < datetime.datetime.now(
+                tz=datetime.timezone.utc) - timedelta(hours=6)
             if should_collect_transactions:
                 transactions_collected = True
-                transactions = nordigen.get_transactions(account.resource_id)
-                account.save_transactions(transactions['transactions']['booked'])
+                try:
+                    transactions = nordigen.get_transactions(account.resource_id)
+                    account.save_transactions(transactions['transactions']['booked'])
+                    account.update_balance(nordigen.get_account_balance(account.resource_id))
+                except ValueError as e:
+                    print(e)
 
         if transactions_collected:
             TransactionHelper.find_links(user)
@@ -121,39 +134,207 @@ class GetTransactions(APIView):
 
         links = models.TransactionLink.objects.filter(from_transaction__account__user=user)
 
-        tags = list(models.Tag.objects.filter(user=None, parent=None)) + list(models.Tag.objects.filter(user=user, parent=None))
+        tags = list(models.Tag.objects.filter(user=None, parent=None)) + list(
+            models.Tag.objects.filter(user=user, parent=None))
         sub_tags = []
 
         for tag in tags:
             sub_tags += list(models.Tag.objects.filter(parent=tag))
 
+        rules = models.TagRule.objects.filter(user=user)
+        for rule in rules:
+            for account in transactions:
+                for transaction in transactions[account]:
+                    if rule.expression.lower() in transaction.reference.lower():
+                        if transaction.tag is None:
+                            transaction.tag = rule.tag
+                            transaction.save()
+
         return JsonResponse(data=serialize.transactions(accounts, transactions, institutions, links, tags, sub_tags))
 
-
-class SetTransactionTag(APIView):
-    permission_classes = (IsAuthenticated,)
-
     def post(self, request):
-        token = request.auth.key
-        user_id = Token.objects.get(key__exact=token).user_id
-        user = models.User.objects.get(id=user_id)
+
+        user = request.user
 
         try:
-            transactionId = request.data['transactionId']
-            tagId = request.data['tagId']
+            transaction_updates = request.data['transactionUpdates']
         except KeyError as e:
             return Response(status=400, data={"error": str(e)})
 
-        transaction = models.Transaction.objects.get(id=transactionId)
-        tag = models.Tag.objects.get(id=tagId)
+        for transaction_update in transaction_updates:
+            try:
+                transaction_id = transaction_update['transactionId']
+            except KeyError as e:
+                return Response(status=400, data={"error": str(e)})
 
-        if transaction.account.user != user or tag.user != user:
-            return Response(status=403)
+            transaction = models.Transaction.objects.get(id=transaction_id)
 
-        transaction.tag = tag
-        models.Transaction.save(transaction)
+            if 'tagId' in transaction_update:
+                tag_id = transaction_update['tagId']
+                tag = models.Tag.objects.get(id=tag_id) if tag_id is not None else None
+
+                valid, response = validate_ownership(tag, user)
+                if not valid:
+                    return response
+
+                transaction.tag = tag
+
+            if 'holidayId' in transaction_update:
+                holiday_id = transaction_update['holidayId']
+                holiday = models.Holiday.objects.get(id=holiday_id) if holiday_id is not None else None
+
+                valid, response = validate_ownership(holiday, user)
+                if not valid:
+                    return response
+
+                transaction.holiday = holiday
+
+            models.Transaction.save(transaction)
 
         return Response(status=200)
+
+def construct_empty_report(categories, tags, sub_tags):
+    report = {
+        "untagged": 0
+    }
+
+    for category in categories:
+        report[category.code] = {}
+        report[category.code]["total"] = 0
+
+    for tag in tags:
+        if tag.category is not None:
+            report[tag.category.code][tag.name] = {"tag": tag.serialize(), "total": 0}
+
+    for sub_tag in sub_tags:
+        parent = sub_tag.parent
+        if parent.category is not None:
+            report[parent.category.code][parent.name][sub_tag.name] = {"tag": sub_tag.serialize(), "total": 0}
+
+    return report
+
+
+class Reports(APIView):
+    permission_classes = (IsAuthenticated,)
+
+    def get(self, request):
+        reports = {}
+
+        user = request.user
+
+        transactions = models.Transaction.getByUser(user)
+
+        tags = list(models.Tag.objects.filter(user=None, parent=None)) + list(
+            models.Tag.objects.filter(user=user, parent=None))
+        sub_tags = []
+
+        for tag in tags:
+            sub_tags += list(models.Tag.objects.filter(parent=tag))
+
+        categories = models.Category.objects.all()
+
+        for transaction in transactions:
+            date: datetime = transaction.booking_date
+            month = date.strftime('%B')
+            if date.year not in reports.keys():
+                reports[date.year] = {}
+            if month not in reports[date.year].keys():
+                reports[date.year][month] = construct_empty_report(categories, tags, sub_tags)
+            if transaction.tag is None:
+                reports[date.year][month]["untagged"] += 1
+            else:
+                if transaction.tag.category is None and transaction.tag.parent is not None:
+                    reports[date.year][month][transaction.tag.parent.category.code][transaction.tag.parent.name][
+                        transaction.tag.name]["total"] += transaction.amount
+                    reports[date.year][month][transaction.tag.parent.category.code][transaction.tag.parent.name][
+                        "total"] += transaction.amount
+                    reports[date.year][month][transaction.tag.parent.category.code]["total"] += transaction.amount
+                elif transaction.tag.category is not None:
+                    reports[date.year][month][transaction.tag.category.code][transaction.tag.name][
+                        "total"] += transaction.amount
+                    reports[date.year][month][transaction.tag.category.code]["total"] += transaction.amount
+
+        return JsonResponse(status=200, data=reports)
+
+
+class Tags(APIView):
+    permission_classes = (IsAuthenticated,)
+
+    def get(self, request):
+
+        user = request.user
+
+        tags = list(models.Tag.objects.filter(user=None, parent=None)) + list(
+            models.Tag.objects.filter(user=user, parent=None))
+        sub_tags = []
+
+        for tag in tags:
+            sub_tags += list(models.Tag.objects.filter(parent=tag))
+
+        rules = models.TagRule.objects.filter(user=user)
+
+        categories = models.Category.objects.all()
+
+        return JsonResponse(data=serialize.tags(tags, sub_tags, rules, categories))
+
+    def put(self, request):
+        user = request.user
+
+        data = request.data
+
+        try:
+            parent_tag_id = data['parentTag'] if 'parentTag' in data else None
+            name = data['name']
+            icon = data['icon']
+        except KeyError as error:
+            return JsonResponse(status=500, data={'error': str(error)})
+
+        tag = models.Tag()
+        tag.user = user
+        tag.name = name
+        tag.icon = icon
+        if parent_tag_id != None:
+            parentTag = models.Tag.objects.get(id=parent_tag_id)
+            tag.parent = parentTag
+
+        tag.save()
+
+        return Response(status=201)
+
+    def patch(self, request):
+        user = request.user
+
+        try:
+            tag_id = request.data['tagId']
+        except KeyError as error:
+            return JsonResponse(status=500, data={'error': str(error)})
+
+        tag = models.Tag.objects.get(id=tag_id)
+
+        if tag.user is not None and tag.user != user:
+            return JsonResponse(status=403, data={'error': 'You are not authorized to edit this tag'})
+
+        if 'name' in request.data:
+            name = request.data['name']
+            tag.name = name
+
+        if 'icon' in request.data:
+            icon = request.data['icon']
+            tag.icon = icon
+
+        if 'categoryCode' in request.data:
+            categoryCode = request.data['categoryCode']
+            tag.category = models.Category.objects.get(code=categoryCode)
+
+        tag.save()
+
+        return Response(status=201)
+
+
+class UpdateTransaction(APIView):
+    permission_classes = (IsAuthenticated,)
+
+
 
 
 class GetInstitutions(APIView):
@@ -173,7 +354,7 @@ class Requisition(APIView):
     permission_classes = (IsAuthenticated,)
 
     def post(self, request):
-        user = get_user_from_token(request.auth.key)
+        user = request.user
 
         try:
             institution_id = request.data['bankCode']
@@ -219,6 +400,9 @@ class Requisition(APIView):
         requisition = models.Requisition.objects.get(id=requisition_id)
 
         status = request.data['status']
+
+        if status == 'ACTIVE':
+            requisition.expires = datetime.date.today() + datetime.timedelta(days=89)
 
         requisition.status = status
         requisition.save()
@@ -286,3 +470,64 @@ class FindLinks(APIView):
         TransactionHelper.find_links(User.objects.get(id=9))
 
         return Response(status=200)
+
+
+class TagRules(APIView):
+    permission_classes = (IsAuthenticated,)
+
+    def get(self, request):
+        user = request.user
+
+        rules = models.TagRule.filter(user=user)
+
+        return JsonResponse(status=200, data=serialize.rules(rules))
+
+    def put(self, request):
+        user = request.user
+
+        data = request.data
+
+        try:
+            tag_id = data['tagId']
+            expression = data['expression']
+        except KeyError as e:
+            return JsonResponse(status=400, data={"error": str(e)})
+
+        rule = models.TagRule()
+        rule.user = user
+        rule.tag = models.Tag.objects.get(id=tag_id)
+        rule.expression = expression
+
+        rule.save()
+
+        return Response(status=201)
+
+    def delete(self, request):
+        user = request.user
+
+        data = request.data
+
+        try:
+            ruleId = data['ruleId']
+        except KeyError as e:
+            return JsonResponse(status=400, data={"error": str(e)})
+
+        rule = models.TagRule.objects.get(id=ruleId)
+
+        if rule.user.id != user.id:
+            return JsonResponse(status=403, data={"error": "Unauthorised to edit this rule"})
+
+        models.TagRule.delete(rule)
+
+        return Response(status=200)
+
+class Holidays(APIView):
+    def get(self, request):
+        user = request.user
+
+        holidays = models.Holiday.objects.filter(user=user)
+
+        return JsonResponse(data={'holidays': serialize.holidays(holidays)})
+
+
+
