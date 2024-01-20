@@ -87,6 +87,7 @@ class Account(models.Model):
 
             if "debtorName" in transaction.keys():
                 transactionObject.debtorName = transaction["debtorName"]
+            if "debtorAccount" in transaction.keys():
                 transactionObject.debtorAccount = transaction["debtorAccount"]["bban"]
 
             if float(transactionObject.amount) < 0 and 'proprietaryBankTransactionCode' in transaction.keys():

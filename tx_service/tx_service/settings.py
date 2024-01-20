@@ -29,7 +29,7 @@ SECRET_KEY = secrets["SECRET_KEY"]
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = bool(secrets["DEBUG"])
 
-ALLOWED_HOSTS = ['192.168.1.207']
+ALLOWED_HOSTS = ['localhost', '192.168.1.207']
 
 CSRF_TRUSTED_ORIGINS = ['http://localhost:3000']
 CORS_ALLOW_CREDENTIALS = True
