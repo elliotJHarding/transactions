@@ -36,4 +36,4 @@ jobs:
     - name: Launch server
       run: |
         cd tx_service
-        RUNNER_TRACKING_ID="" && gunicorn --bind=192.168.1.207 tx_service.wsgi &
+        RUNNER_TRACKING_ID="" && gunicorn --bind=192.168.1.207 --timeout=90 tx_service.wsgi &
