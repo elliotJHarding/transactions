@@ -201,15 +201,16 @@ def construct_empty_report(categories, tags, sub_tags):
     for category in categories:
         report[category.code] = {}
         report[category.code]["total"] = 0
+        report[category.code]["categories"] = {}
 
     for tag in tags:
         if tag.category is not None:
-            report[tag.category.code][tag.name] = {"tag": tag.serialize(), "total": 0}
+            report[tag.category.code]["categories"][tag.name] = {"tag": tag.serialize(), "total": 0, "categories": {}}
 
     for sub_tag in sub_tags:
         parent = sub_tag.parent
         if parent.category is not None:
-            report[parent.category.code][parent.name][sub_tag.name] = {"tag": sub_tag.serialize(), "total": 0}
+            report[parent.category.code]["categories"][parent.name]["categories"][sub_tag.name] = {"tag": sub_tag.serialize(), "total": 0}
 
     return report
 
@@ -233,26 +234,28 @@ class Reports(APIView):
 
         categories = models.Category.objects.all()
 
+        def add_transaction_to_report(report, transaction):
+            if transaction.tag.category is None and transaction.tag.parent is not None:
+                report[transaction.tag.parent.category.code]["categories"][transaction.tag.parent.name]["categories"][transaction.tag.name]["total"] += transaction.amount
+                report[transaction.tag.parent.category.code]["categories"][transaction.tag.parent.name]["total"] += transaction.amount
+                report[transaction.tag.parent.category.code]["total"] += transaction.amount
+            elif transaction.tag.category is not None:
+                report[transaction.tag.category.code]["categories"][transaction.tag.name][
+                    "total"] += transaction.amount
+                report[transaction.tag.category.code]["total"] += transaction.amount
+
         for transaction in transactions:
             date: datetime = transaction.booking_date
             month = date.strftime('%B')
             if date.year not in reports.keys():
-                reports[date.year] = {}
+                reports[date.year] = construct_empty_report(categories, tags, sub_tags)
             if month not in reports[date.year].keys():
                 reports[date.year][month] = construct_empty_report(categories, tags, sub_tags)
             if transaction.tag is None:
                 reports[date.year][month]["untagged"] += 1
             else:
-                if transaction.tag.category is None and transaction.tag.parent is not None:
-                    reports[date.year][month][transaction.tag.parent.category.code][transaction.tag.parent.name][
-                        transaction.tag.name]["total"] += transaction.amount
-                    reports[date.year][month][transaction.tag.parent.category.code][transaction.tag.parent.name][
-                        "total"] += transaction.amount
-                    reports[date.year][month][transaction.tag.parent.category.code]["total"] += transaction.amount
-                elif transaction.tag.category is not None:
-                    reports[date.year][month][transaction.tag.category.code][transaction.tag.name][
-                        "total"] += transaction.amount
-                    reports[date.year][month][transaction.tag.category.code]["total"] += transaction.amount
+                add_transaction_to_report(reports[date.year][month], transaction)
+                add_transaction_to_report(reports[date.year], transaction)
 
         return JsonResponse(status=200, data=reports)
 
