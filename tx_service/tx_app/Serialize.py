@@ -57,14 +57,8 @@ def transactions(accounts, transactions, institutions, links, tags, sub_tags):
     }
     for account in accounts:
         institution = next((ins for ins in institutions if ins.id == account.institution.id), None)
-        account_data = {
-            'accountId': account.id,
-            'name': account.name,
-            'bankName': institution.name,
-            'logo': institution.logo_url,
-            'balance': account.balance,
-            'transactions': []
-        }
+        account_data = account.serialize()
+        account_data['transactions'] = []
         for transaction in transactions[account.id]:
             account_data['transactions'].append(transaction.serialize())
 
