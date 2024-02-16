@@ -235,7 +235,8 @@ class Reports(APIView):
             if month not in reports[date.year].keys():
                 reports[date.year][month] = construct_empty_report(categories, tags, sub_tags)
             if transaction.tag is None:
-                reports[date.year][month]["untagged"] += 1
+                if transaction.holiday is None and transaction.is_unlinked():
+                    reports[date.year][month]["untagged"] += 1
             else:
                 add_transaction_to_report(reports[date.year][month], transaction)
                 add_transaction_to_report(reports[date.year], transaction)
