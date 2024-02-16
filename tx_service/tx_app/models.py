@@ -2,6 +2,8 @@ import datetime
 
 from django.db import models
 from django.contrib.auth.models import User
+from django.db.transaction import atomic
+
 
 
 class Institution(models.Model):
@@ -96,7 +98,8 @@ class Account(models.Model):
             transactions_to_commit.append(transactionObject)
         for transaction in transactions_to_commit:
             try:
-                transaction.save()
+                with atomic():
+                    transaction.save()
             except Exception as exception:
                 print("Transaction skipped: " + str(exception))
 
@@ -207,13 +210,19 @@ class Transaction(models.Model):
             "transactions_code": self.transactions_code
         }
 
-    # def find_active_requisition(self, )
+    def is_unlinked(self):
+        if len(TransactionLink.objects.filter(from_transaction=self)) + len(TransactionLink.objects.filter(to_transaction=self)) == 0:
+            return True
+        else:
+            return False
 
     @staticmethod
     def getByUser(user):
         return [transaction
                 for account in Account.objects.filter(user=user)
                 for transaction in Transaction.objects.filter(account=account)]
+
+
 
 
 class TransactionLink(models.Model):
