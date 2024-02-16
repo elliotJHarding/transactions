@@ -27,17 +27,23 @@ class Requisition(models.Model):
     expires = models.DateField(null=True)
 
 
+class AccountType(models.Model):
+    code = models.CharField(max_length=100)
+    description = models.CharField(max_length=100)
+
 class Account(models.Model):
     resource_id = models.CharField(max_length=200)
     name = models.CharField(max_length=200, null=True)
     user = models.ForeignKey(User, on_delete=models.CASCADE)
     bban = models.BigIntegerField(null=True)
     iban = models.CharField(max_length=200, null=True)
-    institution = models.ForeignKey(Institution, on_delete=models.CASCADE)
+    institution = models.ForeignKey(Institution, on_delete=models.PROTECT)
     balance = models.FloatField(null=True)
     account_name = models.CharField(max_length=200, null=True)
     last_collected_transactions = models.DateTimeField(null=True)
     requisition = models.ForeignKey(Requisition, on_delete=models.SET_NULL, null=True)
+    colour = models.CharField(max_length=50, null=True)
+    type = models.ForeignKey(AccountType, on_delete=models.PROTECT)
 
     def get_bank_number(self):
         if self.iban is not None:
@@ -54,9 +60,13 @@ class Account(models.Model):
             'bankName': self.institution.name,
             'bankCode': self.institution.code,
             'logo': self.institution.logo_url,
+            'balance': self.balance,
             'expires': self.requisition.expires,
-            'expired': self.has_requisition_expired()
+            'expired': self.has_requisition_expired(),
         }
+
+        if self.colour is not None:
+            account_data['colour'] = self.colour
         return account_data
 
     def update_balance(self, amount):
