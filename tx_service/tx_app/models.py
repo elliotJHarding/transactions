@@ -74,7 +74,6 @@ class Account(models.Model):
         self.save()
 
     def save_transactions(self, booked_transactions):
-        transactions_to_commit = []
         for transaction in booked_transactions:
             keys = transaction.keys()
             transactionObject = Transaction()
@@ -105,11 +104,9 @@ class Account(models.Model):
             if float(transactionObject.amount) < 0 and 'proprietaryBankTransactionCode' in transaction.keys():
                 transactionObject.transactions_code = transaction['proprietaryBankTransactionCode']
 
-            transactions_to_commit.append(transactionObject)
-        for transaction in transactions_to_commit:
             try:
                 with atomic():
-                    transaction.save()
+                    transactionObject.save()
             except Exception as exception:
                 print("Transaction skipped: " + str(exception))
 
@@ -181,7 +178,7 @@ class Holiday(models.Model):
 
 class Transaction(models.Model):
     transaction_id = models.CharField(max_length=200, null=True)
-    internal_transaction_id = models.CharField(max_length=200, unique=True)
+    internal_transaction_id = models.CharField(max_length=200)
 
     booking_date = models.DateField()
     value_date = models.DateField(null=True)
@@ -201,9 +198,14 @@ class Transaction(models.Model):
     
     account = models.ForeignKey(Account, models.CASCADE)
 
-    tag = models.ForeignKey(Tag, models.CASCADE, null=True)
+    tag = models.ForeignKey(Tag, models.SET_NULL, null=True)
 
-    holiday = models.ForeignKey(Holiday, models.DO_NOTHING, null=True)
+    holiday = models.ForeignKey(Holiday, models.SET_NULL, null=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(fields=['account', 'internal_transaction_id'], name='unique_transaction')
+        ]
 
     def serialize(self):
         return {
@@ -246,11 +248,13 @@ class TransactionLink(models.Model):
             "fromTransactionId": from_transaction.id,
             "toTransactionId": to_transaction.id,
             "fromAccountId": from_transaction.account.id,
+            "fromAccountIsSavings": from_transaction.account.type.code == "SAVINGS",
             "toAccountId": to_transaction.account.id,
+            "toAccountIsSavings": to_transaction.account.type.code == "SAVINGS",
             "amount": to_transaction.amount,
             "bookingDate": to_transaction.booking_date,
             "bookingDateTime": to_transaction.booking_date_time,
-            "reference": to_transaction.reference
+            "reference": to_transaction.reference,
         }
 
 
