@@ -81,7 +81,7 @@ class Account(models.Model):
             transactionObject.internal_transaction_id = transaction['internalTransactionId']
             transactionObject.booking_date = transaction['bookingDate']
             transactionObject.value_date = transaction['valueDate'] if 'valueDate' in keys else None
-            transactionObject.booking_date_time = transaction['bookingDateTime']
+            transactionObject.booking_date_time = transaction['bookingDateTime'] if 'bookingDateTime' in keys else transaction['bookingDate']
             transactionObject.value_date_time = transaction['valueDateTime'] if 'valueDateTime' in keys else None
 
             transactionObject.amount = transaction['transactionAmount']['amount']
